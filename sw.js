@@ -1,5 +1,5 @@
 // 간단한 PWA 서비스 워커 — 앱 셸 캐시
-const CACHE = "pickleball-v4";
+const CACHE = "pickleball-v5";
 const ASSETS = [
   "./", "./index.html", "./manifest.json",
   "./assets/css/style.css",

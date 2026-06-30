@@ -12,7 +12,7 @@ const DB = (() => {
   let sb = null;
   if (configured && window.supabase) sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
 
-  const LS_KEY = "pickleball_demo_db_v3";
+  const LS_KEY = "pickleball_demo_db_v4";
   function loadLocal() { try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch { return {}; } }
   function saveLocal(d) { localStorage.setItem(LS_KEY, JSON.stringify(d)); }
   function uid() { return "id-" + Math.random().toString(36).slice(2, 10); }
@@ -22,11 +22,11 @@ const DB = (() => {
     const c1 = uid(), m1 = uid(), m2 = uid(), m3 = uid(), s1 = uid();
     const today = new Date();
     const fmt = (dt) => dt.toISOString();
-    d.coaches = [{ id: c1, name: "김코치", phone: "010-1111-2222", address: "서울시 강남구 테헤란로 1", role: "코치", specialty: "초보 레슨", created_at: fmt(today) }];
+    d.coaches = [{ id: c1, name: "김코치", phone: "010-1111-2222", address: "서울시 강남구 테헤란로 1", role: "코치", specialty: "초보 레슨", login_id: "coach", password: "1234", status: "활동", created_at: fmt(today) }];
     d.members = [
-      { id: m1, name: "이회원", phone: "010-3333-4444", birth_date: "1990-05-12", referrer: "김코치", membership_type: "정회원", status: "활동", join_date: "2026-01-10", created_at: fmt(today) },
-      { id: m2, name: "박회원", phone: "010-5555-6666", birth_date: "1988-11-03", referrer: "이회원", membership_type: "체험", status: "활동", join_date: "2026-06-01", created_at: fmt(today) },
-      { id: m3, name: "최신규", phone: "010-7777-8888", birth_date: "1995-02-20", referrer: "박회원", status: "승인대기", join_date: today.toISOString().slice(0, 10), created_at: fmt(today) }
+      { id: m1, name: "이회원", phone: "010-3333-4444", gender: "여", birth_date: "1990-05-12", referrer: "김코치", login_id: "lee", password: "1234", membership_type: "정회원", status: "활동", join_date: "2026-01-10", created_at: fmt(today) },
+      { id: m2, name: "박회원", phone: "010-5555-6666", gender: "남", birth_date: "1988-11-03", referrer: "이회원", login_id: "park", password: "1234", membership_type: "체험", status: "활동", join_date: "2026-06-01", created_at: fmt(today) },
+      { id: m3, name: "최신규", phone: "010-7777-8888", gender: "남", birth_date: "1995-02-20", referrer: "박회원", login_id: "choi", password: "1234", status: "승인대기", join_date: today.toISOString().slice(0, 10), created_at: fmt(today) }
     ];
     const start = new Date(today); start.setHours(19, 0, 0, 0);
     const end = new Date(start); end.setHours(20, 30, 0, 0);
@@ -80,6 +80,5 @@ const DB = (() => {
   }
 
   if (!sb) seedIfEmpty();
-
   return { configured: !!sb, list, insert, update, remove, notify, subscribe };
 })();

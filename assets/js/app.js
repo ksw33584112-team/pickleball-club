@@ -1,5 +1,5 @@
 // ============================================================
-// 피클볼 회원관리 — 로그인/역할(관리자·부관리자·회원) + 공지/스케줄/회비
+// 피클볼 회원관리 — 로그인(아이디+비번)/역할 + 공지/스케줄/회비
 // ============================================================
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -15,6 +15,12 @@ const SLOT_START = 6, SLOT_END = 22, SLOT_CAP = 4;
 const MONTHLY_FEE = 100000;
 const addMonths = (ymd, n) => { const [y, m, d] = ymd.split("-").map(Number); const dt = new Date(y, m - 1 + n, d); return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`; };
 const maskName = (n) => { n = String(n || ""); if (n.length <= 1) return n; if (n.length === 2) return n[0] + "*"; return n[0] + "*".repeat(n.length - 2) + n[n.length - 1]; };
+// 전화번호 자동 하이픈 (01071398602 → 010-7139-8602)
+const fmtPhone = (v) => { let d = String(v || "").replace(/\D/g, "").slice(0, 11); if (d.length < 4) return d; if (d.length < 8) return d.slice(0, 3) + "-" + d.slice(3); return d.slice(0, 3) + "-" + d.slice(3, 7) + "-" + d.slice(7); };
+// 생년월일 8자리 자동변환 (19810403 → 1981-04-03)
+const fmtBirth = (v) => { let d = String(v || "").replace(/\D/g, "").slice(0, 8); if (d.length < 5) return d; if (d.length < 7) return d.slice(0, 4) + "-" + d.slice(4); return d.slice(0, 4) + "-" + d.slice(4, 6) + "-" + d.slice(6); };
+// 예약 상태 뱃지
+const bookingBadge = (st) => { const M = { "신청": ["warn", "예약신청"], "예약": ["ok", "예약확정"], "출석": ["ok", "출석"], "거절": ["bad", "거절"], "취소": ["", "취소"] }; const x = M[st] || ["", st]; return `<span class="pill ${x[0]}">${x[1]}</span>`; };
 
 const NAV = {
   admin: [["dashboard", "공지"], ["members", "회원"], ["schedules", "스케줄"], ["payments", "회비"], ["coaches", "코치"], ["settings", "설정"]],
@@ -48,31 +54,20 @@ const UI = {
     $("#tabs").style.display = "none";
     $$(".view").forEach(v => v.classList.remove("active"));
     $("#view-login").classList.add("active");
-    this.render_login("admin");
+    this.render_login();
   },
-  render_login(mode) {
+  render_login() {
     const club = (window.APP_CONFIG || {}).CLUB_NAME || "피클볼 클럽";
-    const isAdmin = mode === "admin";
     $("#view-login").innerHTML = `
       <div class="login-wrap">
         <div class="login-hero"><div class="login-logo">🏓</div><div class="login-club">${esc(club)}</div>
           <div class="login-sub">회원관리 시스템</div></div>
         <div class="login-card">
-          <div class="seg">
-            <button class="seg-btn ${isAdmin ? "on" : ""}" onclick="UI.render_login('admin')">관리자</button>
-            <button class="seg-btn ${!isAdmin ? "on" : ""}" onclick="UI.render_login('member')">회원</button>
-          </div>
-          ${isAdmin ? `
-            <label>아이디</label><input id="lg_id" placeholder="관리자 아이디" />
-            <label>비밀번호</label><input id="lg_pw" type="password" placeholder="비밀번호" onkeydown="if(event.key==='Enter')UI.loginAdmin()" />
-            <button class="btn login-btn" onclick="UI.loginAdmin()">관리자 로그인</button>
-          ` : `
-            <label>이름</label><input id="lg_name" placeholder="가입한 이름" />
-            <label>전화번호</label><input id="lg_phone" placeholder="010-0000-0000" onkeydown="if(event.key==='Enter')UI.loginMember()" />
-            <button class="btn login-btn" onclick="UI.loginMember()">회원 로그인</button>
-            <div class="login-foot">아직 회원이 아니신가요?
-              <a href="javascript:;" onclick="UI.signupFromLogin()">가입 신청하기</a></div>
-          `}
+          <label>아이디</label><input id="lg_id" placeholder="아이디" autocomplete="username" />
+          <label>비밀번호</label><input id="lg_pw" type="password" placeholder="비밀번호" autocomplete="current-password" onkeydown="if(event.key==='Enter')UI.loginUser()" />
+          <button class="btn login-btn" onclick="UI.loginUser()">로그인</button>
+          <div class="login-foot">아직 회원이 아니신가요?
+            <a href="javascript:;" onclick="UI.signupFromLogin()">가입 신청하기</a></div>
         </div>
       </div>`;
   },
@@ -80,24 +75,35 @@ const UI = {
     try { const rows = await DB.list("app_config"); if (rows && rows[0]) return rows[0]; } catch (e) {}
     return { admin_id: "김소원", admin_pw: "1234" };
   },
-  async loginAdmin() {
+  async loginUser() {
     const id = ($("#lg_id").value || "").trim(), pw = ($("#lg_pw").value || "").trim();
     if (!id || !pw) return UI.toast("아이디와 비밀번호를 입력하세요", true);
-    const c = await this.adminCreds();
-    if (id === c.admin_id && pw === c.admin_pw) this.setSession({ role: "admin", name: id });
-    else UI.toast("아이디 또는 비밀번호가 틀립니다", true);
+    const creds = await this.adminCreds();
+    if (id === creds.admin_id && pw === creds.admin_pw) return this.setSession({ role: "admin", name: id });
+    const coaches = await DB.list("coaches");
+    const c = coaches.find(x => x.login_id && x.login_id === id);
+    if (c) {
+      if ((c.password || "") !== pw) return UI.toast("비밀번호가 틀립니다", true);
+      if ((c.status || "활동") !== "활동") return UI.toast("부관리자 승인 대기 중입니다.", true);
+      return this.setSession({ role: "coach", name: c.name, coachId: c.id });
+    }
+    const members = await DB.list("members");
+    const m = members.find(x => x.login_id && x.login_id === id);
+    if (m) {
+      if ((m.password || "") !== pw) return UI.toast("비밀번호가 틀립니다", true);
+      if (m.status !== "활동") return UI.toast("가입 승인 대기 중이거나 비활성 상태입니다.", true);
+      return this.setSession({ role: "member", name: m.name, memberId: m.id });
+    }
+    UI.toast("아이디 또는 비밀번호가 틀립니다", true);
   },
-  async loginMember() {
-    const name = ($("#lg_name").value || "").trim(), phone = ($("#lg_phone").value || "").trim();
-    if (!name || !phone) return UI.toast("이름과 전화번호를 입력하세요", true);
-    const norm = p => String(p || "").replace(/[^0-9]/g, "");
-    const [coaches, members] = await Promise.all([DB.list("coaches"), DB.list("members")]);
-    const coach = coaches.find(c => c.name === name && norm(c.phone) === norm(phone));
-    if (coach) return this.setSession({ role: "coach", name: coach.name, coachId: coach.id });
-    const mem = members.find(m => m.name === name && norm(m.phone) === norm(phone));
-    if (!mem) return UI.toast("일치하는 회원이 없습니다. 가입 신청 후 승인되면 로그인돼요.", true);
-    if (mem.status !== "활동") return UI.toast("아직 가입 승인 전이거나 비활성 상태입니다.", true);
-    this.setSession({ role: "member", name: mem.name, memberId: mem.id });
+  async loginIdTaken(loginId, exMember, exCoach) {
+    if (!loginId) return false;
+    const creds = await this.adminCreds();
+    if (loginId === creds.admin_id) return true;
+    const [members, coaches] = await Promise.all([DB.list("members"), DB.list("coaches")]);
+    if (members.some(m => m.login_id === loginId && m.id !== exMember)) return true;
+    if (coaches.some(c => c.login_id === loginId && c.id !== exCoach)) return true;
+    return false;
   },
   setSession(s) { this.session = s; localStorage.setItem("pb_session", JSON.stringify(s)); this.enterApp(); },
   logout() {
@@ -144,16 +150,17 @@ const UI = {
   },
   async refreshBell(silent) {
     if (!this.isStaff()) return;
-    let members, bookings;
-    try { [members, bookings] = await Promise.all([DB.list("members"), DB.list("bookings")]); } catch (e) { return; }
+    let members, bookings, coaches;
+    try { [members, bookings, coaches] = await Promise.all([DB.list("members"), DB.list("bookings"), DB.list("coaches")]); } catch (e) { return; }
     const pendM = members.filter(m => m.status === "승인대기").length;
     const pendB = bookings.filter(b => b.status === "신청").length;
-    const pend = pendM + pendB;
+    const pendC = coaches.filter(c => (c.status || "활동") === "승인대기").length;
+    const pend = pendM + pendB + pendC;
     const el = $("#bellCount");
     if (el) { if (pend > 0) { el.textContent = pend > 99 ? "99+" : pend; el.classList.remove("hidden"); } else el.classList.add("hidden"); }
     if (!silent && pend > (this._lastPend || 0)) {
       UI.toast(`🔔 새 요청 ${pend - (this._lastPend || 0)}건 도착`);
-      UI.notifyAdmin("새 요청 도착", `가입 승인 대기 ${pendM}건 · 예약 문의 ${pendB}건`);
+      UI.notifyAdmin("새 요청 도착", `가입 ${pendM} · 예약 ${pendB} · 부관리자 ${pendC}`);
     }
     this._lastPend = pend;
   },
@@ -167,23 +174,36 @@ const UI = {
   openModal(title, html) { $("#modalTitle").textContent = title; $("#modalBody").innerHTML = html; $("#modal").classList.remove("hidden"); },
   closeModal() { $("#modal").classList.add("hidden"); },
 
+  // ==================== 대시보드 = 공지사항 (+회원 개인 회비 안내) ====================
   async render_dashboard() {
     const notices = await DB.list("notices", { order: "created_at", asc: false });
     const club = (window.APP_CONFIG || {}).CLUB_NAME || "피클볼 클럽";
     const canPost = this.isStaff();
+    let myFee = "";
+    if (this.isMember()) {
+      const payments = (await DB.list("payments")).filter(p => p.member_id === this.session.memberId);
+      const due = payments.map(p => p.period_end).filter(Boolean).sort().pop();
+      const now = new Date();
+      let state, cls, label;
+      if (!due) { state = "회비 납부 기록이 없습니다. 첫 회비 납부를 진행해 주세요."; cls = "warn"; label = "확인"; }
+      else { const days = (new Date(due) - now) / 86400000;
+        if (days < 0) { state = `회비가 만료되었습니다 (만료일 ${dDate(due)}). 회비 납부를 부탁드립니다.`; cls = "bad"; label = "미납"; }
+        else if (days <= 7) { state = `회비 납부 예정일이 다가옵니다: ${dDate(due)}`; cls = "warn"; label = "임박"; }
+        else { state = `회비 정상입니다. 다음 납부 예정일: ${dDate(due)}`; cls = "ok"; label = "정상"; }
+      }
+      myFee = `<div class="card notice"><div class="row spread"><b class="notice-title">💳 내 회비 안내</b><span class="pill ${cls}">${label}</span></div><div class="notice-body">${esc(state)}</div></div>`;
+    }
     $("#view-dashboard").innerHTML = `
       <div class="hero"><div class="hero-inner">
         <div class="hero-title">🏓 ${esc(club)}</div>
         <div class="hero-sub">공지사항</div>
       </div></div>
+      ${myFee}
       <div class="row spread"><h2>📢 공지사항</h2>
         ${canPost ? `<button class="btn" onclick="UI.noticeForm()">+ 공지 작성</button>` : ""}</div>
       ${notices.length ? notices.map(n => `
         <div class="card notice">
-          <div class="row spread">
-            <b class="notice-title">${esc(n.title)}</b>
-            <span class="li-sub">${dDate(n.created_at)}</span>
-          </div>
+          <div class="row spread"><b class="notice-title">${esc(n.title)}</b><span class="li-sub">${dDate(n.created_at)}</span></div>
           <div class="notice-body">${esc(n.content).replace(/\n/g, "<br>")}</div>
           ${canPost ? `<div class="row" style="justify-content:flex-end;margin-top:8px">
             <button class="btn ghost sm" onclick='UI.noticeForm(${JSON.stringify(n).replace(/'/g, "\\'")})'>수정</button>
@@ -196,8 +216,7 @@ const UI = {
       <label>내용</label><textarea id="n_content" rows="6">${esc(n.content || "")}</textarea>
       <div class="row" style="margin-top:16px;justify-content:flex-end">
         <button class="btn ghost" onclick="UI.closeModal()">취소</button>
-        <button class="btn" onclick="UI.saveNotice('${n.id || ""}')">저장</button>
-      </div>`);
+        <button class="btn" onclick="UI.saveNotice('${n.id || ""}')">저장</button></div>`);
   },
   async saveNotice(id) {
     const row = { title: $("#n_title").value.trim(), content: $("#n_content").value.trim() };
@@ -208,6 +227,7 @@ const UI = {
   },
   async deleteNotice(id) { if (!confirm("이 공지를 삭제할까요?")) return; await DB.remove("notices", id); UI.render_dashboard(); },
 
+  // ==================== 회원 (관리자·부관리자) ====================
   async render_members() {
     if (!this.isStaff()) return this.show("dashboard");
     const members = await DB.list("members");
@@ -221,8 +241,8 @@ const UI = {
         <b>⏳ 가입 승인 대기 (${pending.length})</b>
         ${pending.map(m => `<div class="row spread" style="padding:8px 0;border-top:1px solid var(--line)">
           <div onclick="UI.openMember('${m.id}')" style="cursor:pointer">
-            <div class="li-main">${esc(m.name)}</div>
-            <div class="li-sub">${esc(m.phone || "-")} · 생년월일 ${esc(m.birth_date || "-")} · 추천인 ${esc(m.referrer || "-")}</div></div>
+            <div class="li-main">${esc(m.name)} <span class="muted">${esc(m.gender || "")}</span></div>
+            <div class="li-sub">${esc(m.phone || "-")} · 생년월일 ${esc(m.birth_date || "-")} · 아이디 ${esc(m.login_id || "-")}</div></div>
           <div class="row"><button class="btn sm" onclick="UI.approveMember('${m.id}')">승인</button>
             <button class="btn ghost sm" onclick="UI.rejectMember('${m.id}')">거절</button></div>
         </div>`).join("")}</div>` : ""}
@@ -237,19 +257,29 @@ const UI = {
     $("#memList").innerHTML = list.length ? list.map(m => `
       <div class="list-item" onclick="UI.openMember('${m.id}')">
         <div><div class="li-main">${esc(m.name)} <span class="pill ${m.status === "활동" ? "ok" : "warn"}">${esc(m.status)}</span></div>
-          <div class="li-sub">${esc(m.phone || "-")} · 추천인 ${esc(m.referrer || "-")}</div></div>
+          <div class="li-sub">${esc(m.phone || "-")} · 아이디 ${esc(m.login_id || "-")}</div></div>
         <span class="muted">›</span></div>`).join("") : `<div class="empty">회원이 없습니다.</div>`;
   },
   memberForm(m = {}) {
     const f = (k) => esc(m[k] || "");
     const editing = !!m.id;
     const fromLogin = !this.session;
+    const g = m.gender || "";
     this.openModal(editing ? "회원 정보 수정" : "가입 신청", `
       <label>이름 *</label><input id="m_name" value="${f("name")}" />
-      <label>전화번호 *</label><input id="m_phone" value="${f("phone")}" placeholder="010-0000-0000" />
-      <label>생년월일</label><input type="date" id="m_birth" value="${f("birth_date")}" />
+      <label>성별</label><select id="m_gender">
+        <option value="" ${!g ? "selected" : ""}>선택</option>
+        <option value="남" ${g === "남" ? "selected" : ""}>남</option>
+        <option value="여" ${g === "여" ? "selected" : ""}>여</option></select>
+      <label>전화번호 *</label><input id="m_phone" value="${f("phone")}" placeholder="010-0000-0000" inputmode="numeric" oninput="this.value=fmtPhone(this.value)" />
+      <label>생년월일</label><input id="m_birth" value="${f("birth_date")}" placeholder="예: 19810403" inputmode="numeric" oninput="this.value=fmtBirth(this.value)" />
       <label>추천인</label><input id="m_referrer" value="${f("referrer")}" placeholder="소개해 주신 분" />
-      ${editing ? `<label>상태</label><select id="m_status">${["승인대기", "활동", "휴면", "탈퇴"].map(o => `<option ${m.status === o ? "selected" : ""}>${o}</option>`).join("")}</select>` : `<div class="banner" style="margin-top:12px">신청하면 <b>승인 대기</b> 상태로 등록되고, 관리자 승인 후 <b>이름+전화번호</b>로 로그인할 수 있어요.</div>`}
+      <label>아이디 *</label><input id="m_loginid" value="${f("login_id")}" placeholder="로그인 아이디" autocomplete="off" />
+      ${editing
+        ? `<div class="row" style="margin-top:8px"><button class="btn ghost sm" onclick="UI.resetMemberPw('${m.id}')">비밀번호 1234로 초기화</button></div>
+           <label>상태</label><select id="m_status">${["승인대기", "활동", "휴면", "탈퇴"].map(o => `<option ${m.status === o ? "selected" : ""}>${o}</option>`).join("")}</select>`
+        : `<label>비밀번호 *</label><input id="m_pw" type="password" placeholder="로그인 비밀번호" autocomplete="new-password" />
+           <div class="banner" style="margin-top:12px">신청하면 <b>승인 대기</b> 상태로 등록되고, 관리자 승인 후 <b>아이디+비밀번호</b>로 로그인할 수 있어요.</div>`}
       <div class="row" style="margin-top:16px;justify-content:flex-end">
         ${editing ? `<button class="btn danger" onclick="UI.deleteMember('${m.id}')">삭제</button>` : ""}
         <button class="btn ghost" onclick="UI.closeModal()">취소</button>
@@ -257,16 +287,33 @@ const UI = {
       </div>`);
   },
   async saveMember(id, fromLogin) {
-    const row = { name: $("#m_name").value.trim(), phone: $("#m_phone").value.trim(), birth_date: $("#m_birth").value || null, referrer: $("#m_referrer").value.trim() };
+    const b = ($("#m_birth").value || "").trim();
+    const row = {
+      name: $("#m_name").value.trim(), gender: ($("#m_gender") || {}).value || null,
+      phone: $("#m_phone").value.trim(), birth_date: /^\d{4}-\d{2}-\d{2}$/.test(b) ? b : null,
+      referrer: $("#m_referrer").value.trim(), login_id: ($("#m_loginid").value || "").trim()
+    };
     if (!row.name || !row.phone) return UI.toast("이름과 전화번호는 필수입니다", true);
+    if (!row.login_id) return UI.toast("아이디를 입력하세요", true);
     try {
-      if (id) { row.status = $("#m_status").value; await DB.update("members", id, row); UI.closeModal(); UI.toast("저장됨"); UI.render_members(); }
-      else {
-        row.status = "승인대기"; await DB.insert("members", row); UI.closeModal();
+      if (id) {
+        row.status = $("#m_status").value;
+        if (await this.loginIdTaken(row.login_id, id, null)) return UI.toast("이미 사용 중인 아이디입니다", true);
+        await DB.update("members", id, row); UI.closeModal(); UI.toast("저장됨"); UI.render_members();
+      } else {
+        const pw = ($("#m_pw").value || "").trim();
+        if (!pw) return UI.toast("비밀번호를 입력하세요", true);
+        if (await this.loginIdTaken(row.login_id, null, null)) return UI.toast("이미 사용 중인 아이디입니다", true);
+        row.password = pw; row.status = "승인대기";
+        await DB.insert("members", row); UI.closeModal();
         if (fromLogin) UI.toast("가입 신청 완료! 관리자 승인 후 로그인하세요.");
         else { UI.toast("가입 신청 완료 (승인 대기)"); if (this.isStaff()) UI.render_members(); }
       }
     } catch (e) { UI.toast("저장 실패: " + e.message, true); }
+  },
+  async resetMemberPw(id) {
+    if (!confirm("이 회원의 비밀번호를 1234로 초기화할까요?")) return;
+    await DB.update("members", id, { password: "1234" }); UI.toast("비밀번호가 1234로 초기화되었습니다");
   },
   async approveMember(id) {
     await DB.update("members", id, { status: "활동", join_date: new Date().toISOString().slice(0, 10) });
@@ -288,13 +335,15 @@ const UI = {
     const nextDue = myPays.map(p => p.period_end).filter(Boolean).sort().pop();
     this.openModal(m.name, `
       <div class="row spread">
-        <div class="li-sub">${esc(m.phone || "-")} · 생년월일 ${esc(m.birth_date || "-")} · 추천인 ${esc(m.referrer || "-")}
+        <div class="li-sub">${esc(m.gender || "")} · ${esc(m.phone || "-")} · 생년월일 ${esc(m.birth_date || "-")}<br>아이디 ${esc(m.login_id || "-")} · 추천인 ${esc(m.referrer || "-")}
           <span class="pill ${m.status === "활동" ? "ok" : "warn"}">${esc(m.status)}</span></div>
         <button class="btn ghost sm" onclick='UI.memberForm(${JSON.stringify(m).replace(/'/g, "\\'")})'>수정</button>
       </div>
-      ${m.status === "승인대기" ? `<div class="row" style="margin-top:10px">
-        <button class="btn" onclick="UI.approveMember('${id}')">가입 승인</button>
-        <button class="btn ghost" onclick="UI.rejectMember('${id}')">거절</button></div>` : ""}
+      <div class="row" style="margin-top:8px">
+        ${m.status === "승인대기" ? `<button class="btn" onclick="UI.approveMember('${id}')">가입 승인</button>
+          <button class="btn ghost" onclick="UI.rejectMember('${id}')">거절</button>` : ""}
+        <button class="btn ghost sm" onclick="UI.resetMemberPw('${id}')">비번 초기화(1234)</button>
+      </div>
       <div class="card" style="margin-top:12px">
         <b>회비</b> <span class="muted">· 다음 기준일: ${nextDue ? dDate(nextDue) : "기록 없음"}</span>
         ${myPays.length ? myPays.map(p => `<div class="li-sub">• ${dDate(p.paid_date)} ${won(p.amount)} (${dDate(p.period_start)}~${dDate(p.period_end)})</div>`).join("") : `<div class="empty">납부 기록 없음</div>`}
@@ -305,6 +354,7 @@ const UI = {
       </div>`);
   },
 
+  // ==================== 스케줄 ====================
   async render_schedules() {
     const [schedules, coaches, bookings] = await Promise.all([
       DB.list("schedules", { order: "start_at", asc: true }), DB.list("coaches"), DB.list("bookings")]);
@@ -325,6 +375,7 @@ const UI = {
     const [yy, mm, dd] = dayKey.split("-").map(Number);
     const wd = ["일", "월", "화", "수", "목", "금", "토"][new Date(yy, mm - 1, dd).getDay()];
     const staff = this.isStaff();
+    const myId = this.isMember() ? this.session.memberId : null;
     let rows = "";
     for (let h = SLOT_START; h < SLOT_END; h++) {
       const schs = byHour[h] || [];
@@ -335,19 +386,24 @@ const UI = {
         const full = booked.length >= (s.capacity || 99);
         return `<div class="slot-sch">
           <b>${esc(s.title)}</b> <span class="pill ${full ? "bad" : "ok"}">${booked.length}/${s.capacity || "-"}</span>
-          ${booked.length ? `<div class="li-sub">예약확정: ${booked.map(b => nm(b.member_id)).join(", ")}</div>` : ""}
-          ${reqs.map(b => `<div class="row spread slot-req"><span><span class="pill warn">신청</span> ${nm(b.member_id)}</span>
+          ${booked.length ? `<div class="li-sub">${bookingBadge("예약")} ${booked.map(b => nm(b.member_id)).join(", ")}</div>` : ""}
+          ${reqs.map(b => `<div class="row spread slot-req"><span>${bookingBadge("신청")} ${nm(b.member_id)}</span>
             ${staff ? `<span class="row"><button class="btn sm" onclick="UI.slotApprove('${b.id}','${dayKey}')">승인</button>
             <button class="btn ghost sm" onclick="UI.slotReject('${b.id}','${dayKey}')">거절</button></span>` : ""}</div>`).join("")}
         </div>`;
       }).join("");
+      let action;
+      if (staff) action = `<button class="btn ghost sm slot-add" onclick="UI.requestSlot('${dayKey}',${h})">신청추가</button>`;
+      else {
+        const mine = schs.flatMap(s => bookings.filter(b => b.schedule_id === s.id && b.member_id === myId && ["신청", "예약", "출석"].includes(b.status)));
+        action = mine.length ? bookingBadge(mine[0].status) : `<button class="btn sm slot-add" onclick="UI.requestSlot('${dayKey}',${h})">예약하기</button>`;
+      }
       rows += `<div class="slot-row"><div class="slot-time">${String(h).padStart(2, "0")}:00</div>
-        <div class="slot-body">${inner}</div>
-        <button class="btn ghost sm slot-add" onclick="UI.requestSlot('${dayKey}',${h})">${staff ? "신청" : "예약"}</button></div>`;
+        <div class="slot-body">${inner}</div><div class="slot-act">${action}</div></div>`;
     }
     const memberPicker = staff
       ? `<label>신청할 회원</label><select id="slotMember">${active.length ? active.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join("") : `<option value="">활동 회원 없음</option>`}</select>`
-      : `<div class="banner">원하는 시간의 <b>예약</b> 버튼을 누르면 신청됩니다. 관리자 승인 후 예약이 확정돼요.</div>`;
+      : `<div class="banner">원하는 시간의 <b>예약하기</b> 버튼을 누르면 신청됩니다. <b>${bookingBadge("신청")}</b>(예약신청) → 관리자 승인 → <b>${bookingBadge("예약")}</b>(예약확정)</div>`;
     this.openModal(`${mm}월 ${dd}일 (${wd}) 시간표`, `${memberPicker}<div class="slot-list">${rows}</div>`);
   },
   async requestSlot(dayKey, hour) {
@@ -364,10 +420,10 @@ const UI = {
       if (bs.length) return UI.toast("이미 신청/예약된 시간입니다", true);
     }
     await DB.insert("bookings", { schedule_id: s.id, member_id: memberId, status: "신청" });
-    UI.toast("신청 완료 (승인 대기)");
+    UI.toast("예약 신청 완료 (관리자 승인 후 확정)");
     UI.openDay(dayKey);
   },
-  async slotApprove(bookingId, dayKey) { await DB.update("bookings", bookingId, { status: "예약" }); UI.toast("예약 승인됨"); UI.openDay(dayKey); },
+  async slotApprove(bookingId, dayKey) { await DB.update("bookings", bookingId, { status: "예약" }); UI.toast("예약 확정됨"); UI.openDay(dayKey); },
   async slotReject(bookingId, dayKey) { await DB.update("bookings", bookingId, { status: "거절" }); UI.toast("신청 거절됨"); UI.openDay(dayKey); },
   drawCalendar() {
     const { y, m, sel } = this.cal;
@@ -395,7 +451,7 @@ const UI = {
       <div class="cal-grid cal-wd">${wd.map((w, i) => `<div class="cal-wdcell${i === 0 ? " sun" : i === 6 ? " sat" : ""}">${w}</div>`).join("")}</div>
       <div class="cal-grid">${cells}</div>
       <div class="card" style="margin-top:14px">
-        <div class="row spread"><b>${selLabel}</b><button class="btn sm" onclick="UI.openDay('${sel}')">시간표 열기</button></div>
+        <div class="row spread"><b>${selLabel}</b><button class="btn sm" onclick="UI.openDay('${sel}')">시간표 / 예약</button></div>
         ${selItems.length ? selItems.map(s => {
           const coach = coaches.find(c => c.id === s.coach_id);
           return `<div class="list-item" onclick="UI.openDay('${sel}')">
@@ -439,6 +495,7 @@ const UI = {
     await DB.remove("schedules", id); UI.closeModal(); UI.toast("삭제됨"); UI.render_schedules();
   },
 
+  // ==================== 회비 (관리자·부관리자) ====================
   async render_payments() {
     if (!this.isStaff()) return this.show("dashboard");
     const [members, payments] = await Promise.all([DB.list("members"), DB.list("payments")]);
@@ -526,43 +583,75 @@ const UI = {
     } catch (e) { UI.toast("저장 실패: " + e.message, true); }
   },
 
+  // ==================== 코치 = 부관리자 ====================
   async render_coaches() {
     if (!this.isStaff()) return this.show("dashboard");
     const coaches = await DB.list("coaches");
+    const pending = coaches.filter(c => (c.status || "활동") === "승인대기");
+    const active = coaches.filter(c => (c.status || "활동") !== "승인대기");
     $("#view-coaches").innerHTML = `
       <div class="row spread"><h2>코칭 스탭 · 부관리자 (${coaches.length})</h2>
         <button class="btn" onclick="UI.coachForm()">+ 추가</button></div>
-      <div class="banner">여기 등록된 분들은 <b>부관리자</b>로, 본인 <b>이름+전화번호</b>로 로그인하면 관리자와 거의 같은 화면(설정 제외)을 볼 수 있어요.</div>
-      ${coaches.length ? coaches.map(c => `
-        <div class="list-item" onclick='UI.coachForm(${JSON.stringify(c).replace(/'/g, "\\'")})'>
-          <div><div class="li-main">${esc(c.name)} <span class="pill">${esc(c.role || "")}</span></div>
-          <div class="li-sub">${esc(c.phone || "-")} · ${esc(c.address || "주소 미입력")}</div></div>
-          <span class="muted">›</span></div>`).join("") : `<div class="empty">등록된 코치가 없습니다.</div>`}`;
+      <div class="banner">부관리자는 <b>아이디+비밀번호</b>로 로그인하고, 관리자 <b>승인(활동)</b> 후 관리자와 거의 같은 화면(설정 제외) + <b>스케줄 예약 승인</b> 권한을 가져요.</div>
+      ${pending.length ? `<div class="card" style="border-color:var(--warn)"><b>⏳ 부관리자 승인 대기 (${pending.length})</b>
+        ${pending.map(c => `<div class="row spread" style="padding:8px 0;border-top:1px solid var(--line)">
+          <div onclick='UI.coachForm(${JSON.stringify(c).replace(/'/g, "\\'")})' style="cursor:pointer">
+            <div class="li-main">${esc(c.name)} <span class="muted">@${esc(c.login_id || "")}</span></div>
+            <div class="li-sub">${esc(c.phone || "-")} · ${esc(c.role || "")}</div></div>
+          <button class="btn sm" onclick="UI.approveCoach('${c.id}')">승인</button></div>`).join("")}</div>` : ""}
+      ${active.length ? active.map(c => `<div class="list-item" onclick='UI.coachForm(${JSON.stringify(c).replace(/'/g, "\\'")})'>
+        <div><div class="li-main">${esc(c.name)} <span class="pill ok">${esc(c.role || "")}</span></div>
+        <div class="li-sub">@${esc(c.login_id || "-")} · ${esc(c.phone || "-")}</div></div><span class="muted">›</span></div>`).join("") : ""}
+      ${!coaches.length ? `<div class="empty">등록된 코치가 없습니다.</div>` : ""}`;
   },
   coachForm(c = {}) {
     const f = (k) => esc(c[k] || "");
-    this.openModal(c.id ? "부관리자 정보" : "부관리자(코치) 추가", `
+    const editing = !!c.id;
+    this.openModal(editing ? "부관리자 정보" : "부관리자(코치) 추가", `
       <label>이름 *</label><input id="c_name" value="${f("name")}" />
-      <div class="grid2"><div><label>연락처 * (로그인 ID)</label><input id="c_phone" value="${f("phone")}" placeholder="010-0000-0000" /></div>
-        <div><label>역할</label><select id="c_role">${["코치", "매니저", "스탭"].map(o => `<option ${c.role === o ? "selected" : ""}>${o}</option>`).join("")}</select></div></div>
+      <label>연락처</label><input id="c_phone" value="${f("phone")}" placeholder="010-0000-0000" inputmode="numeric" oninput="this.value=fmtPhone(this.value)" />
+      <label>역할</label><select id="c_role">${["코치", "매니저", "스탭"].map(o => `<option ${c.role === o ? "selected" : ""}>${o}</option>`).join("")}</select>
+      <label>아이디 *</label><input id="c_loginid" value="${f("login_id")}" placeholder="로그인 아이디" autocomplete="off" />
+      ${editing
+        ? `<div class="row" style="margin-top:8px"><button class="btn ghost sm" onclick="UI.resetCoachPw('${c.id}')">비밀번호 1234로 초기화</button></div>
+           <label>상태</label><select id="c_status">${["승인대기", "활동"].map(o => `<option ${(c.status || "활동") === o ? "selected" : ""}>${o}</option>`).join("")}</select>`
+        : `<label>비밀번호 *</label><input id="c_pw" type="password" placeholder="로그인 비밀번호" autocomplete="new-password" />`}
       <label>주소</label><input id="c_addr" value="${f("address")}" />
       <label>전문 분야</label><input id="c_spec" value="${f("specialty")}" />
       <label>메모</label><textarea id="c_notes" rows="2">${f("notes")}</textarea>
-      <div class="banner" style="margin-top:10px">이 분은 <b>이름 + 전화번호</b>로 로그인해 부관리자 권한을 가져요.</div>
+      <div class="banner" style="margin-top:10px">부관리자는 <b>아이디 + 비밀번호</b>로 로그인하며, <b>승인(활동)</b> 후 예약 승인 등 관리 권한을 가져요.</div>
       <div class="row" style="margin-top:14px;justify-content:flex-end">
-        ${c.id ? `<button class="btn danger" onclick="UI.deleteCoach('${c.id}')">삭제</button>` : ""}
+        ${editing ? `<button class="btn danger" onclick="UI.deleteCoach('${c.id}')">삭제</button>` : ""}
         <button class="btn ghost" onclick="UI.closeModal()">취소</button>
         <button class="btn" onclick="UI.saveCoach('${c.id || ""}')">저장</button></div>`);
   },
   async saveCoach(id) {
-    const row = { name: $("#c_name").value.trim(), phone: $("#c_phone").value.trim(), role: $("#c_role").value, address: $("#c_addr").value.trim(), specialty: $("#c_spec").value.trim(), notes: $("#c_notes").value.trim() };
-    if (!row.name || !row.phone) return UI.toast("이름과 연락처는 필수입니다", true);
-    try { if (id) await DB.update("coaches", id, row); else await DB.insert("coaches", row);
+    const row = { name: $("#c_name").value.trim(), phone: $("#c_phone").value.trim(), role: $("#c_role").value, login_id: ($("#c_loginid").value || "").trim(), address: $("#c_addr").value.trim(), specialty: $("#c_spec").value.trim(), notes: $("#c_notes").value.trim() };
+    if (!row.name) return UI.toast("이름을 입력하세요", true);
+    if (!row.login_id) return UI.toast("아이디를 입력하세요", true);
+    try {
+      if (id) {
+        row.status = $("#c_status").value;
+        if (await this.loginIdTaken(row.login_id, null, id)) return UI.toast("이미 사용 중인 아이디입니다", true);
+        await DB.update("coaches", id, row);
+      } else {
+        const pw = ($("#c_pw").value || "").trim();
+        if (!pw) return UI.toast("비밀번호를 입력하세요", true);
+        if (await this.loginIdTaken(row.login_id, null, null)) return UI.toast("이미 사용 중인 아이디입니다", true);
+        row.password = pw; row.status = "승인대기";
+        await DB.insert("coaches", row);
+      }
       UI.closeModal(); UI.toast("저장됨"); UI.render_coaches();
     } catch (e) { UI.toast("저장 실패: " + e.message, true); }
   },
+  async resetCoachPw(id) {
+    if (!confirm("이 부관리자의 비밀번호를 1234로 초기화할까요?")) return;
+    await DB.update("coaches", id, { password: "1234" }); UI.toast("비밀번호가 1234로 초기화되었습니다");
+  },
+  async approveCoach(id) { await DB.update("coaches", id, { status: "활동" }); UI.toast("부관리자 승인됨"); UI.render_coaches(); },
   async deleteCoach(id) { if (!confirm("이 부관리자를 삭제할까요?")) return; await DB.remove("coaches", id); UI.closeModal(); UI.toast("삭제됨"); UI.render_coaches(); },
 
+  // ==================== 내정보 (회원) ====================
   async render_myinfo() {
     if (!this.isMember()) return this.show("dashboard");
     const id = this.session.memberId;
@@ -576,16 +665,16 @@ const UI = {
       .sort((a, b) => a.s.start_at > b.s.start_at ? 1 : -1);
     $("#view-myinfo").innerHTML = `
       <h2>내 정보</h2>
-      <div class="card"><div class="li-main">${esc(m.name)}</div>
-        <div class="li-sub">${esc(m.phone || "-")} · ${esc(m.membership_type || "회원")} · 가입일 ${dDate(m.join_date)}</div></div>
+      <div class="card"><div class="li-main">${esc(m.name)} <span class="muted">${esc(m.gender || "")}</span></div>
+        <div class="li-sub">${esc(m.phone || "-")} · 아이디 ${esc(m.login_id || "-")} · 가입일 ${dDate(m.join_date)}</div></div>
       <div class="card"><b>회비</b> <span class="muted">· 다음 입금 예정일: ${nextDue ? dDate(nextDue) : "기록 없음"}</span>
         ${myPays.length ? myPays.map(p => `<div class="li-sub">• ${dDate(p.paid_date)} ${won(p.amount)} (${p.months || 1}개월, ~${dDate(p.period_end)})</div>`).join("") : `<div class="empty">납부 기록이 없습니다.</div>`}</div>
       <div class="card"><b>내 예약</b>
         ${myBooks.length ? myBooks.map(x => `<div class="row spread" style="padding:5px 0">
-          <span>${esc(x.s.title)} <span class="muted">${dDateTime(x.s.start_at)}</span></span>
-          <span class="pill ${x.b.status === "예약" || x.b.status === "출석" ? "ok" : "warn"}">${esc(x.b.status)}</span></div>`).join("") : `<div class="empty">예약 내역이 없습니다. 스케줄에서 예약하세요.</div>`}</div>`;
+          <span>${esc(x.s.title)} <span class="muted">${dDateTime(x.s.start_at)}</span></span>${bookingBadge(x.b.status)}</div>`).join("") : `<div class="empty">예약 내역이 없습니다. 스케줄에서 예약하세요.</div>`}</div>`;
   },
 
+  // ==================== 설정 (관리자) ====================
   async render_settings() {
     if (!this.isAdmin()) return this.show("dashboard");
     const c = await this.adminCreds();
@@ -596,14 +685,11 @@ const UI = {
         <div class="li-sub" style="margin:4px 0 10px">아이디와 비밀번호를 바꿀 수 있어요. 변경 후엔 새 정보로 로그인하세요.</div>
         <label>아이디</label><input id="set_id" value="${esc(c.admin_id || "")}" />
         <label>새 비밀번호</label><input id="set_pw" type="text" value="${esc(c.admin_pw || "")}" />
-        <div class="row" style="margin-top:14px;justify-content:flex-end">
-          <button class="btn" onclick="UI.saveSettings()">저장</button></div>
+        <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="UI.saveSettings()">저장</button></div>
       </div>
-      <div class="card">
-        <b>클럽 정보</b>
+      <div class="card"><b>클럽 정보</b>
         <div class="li-sub">클럽 이름: ${esc((window.APP_CONFIG || {}).CLUB_NAME || "피클볼 클럽")}</div>
-        <div class="li-sub">데이터 연결: ${DB.configured ? "Supabase 연결됨 ✅" : "데모 모드(로컬)"}</div>
-      </div>`;
+        <div class="li-sub">데이터 연결: ${DB.configured ? "Supabase 연결됨 ✅" : "데모 모드(로컬)"}</div></div>`;
   },
   async saveSettings() {
     const admin_id = ($("#set_id").value || "").trim(), admin_pw = ($("#set_pw").value || "").trim();
