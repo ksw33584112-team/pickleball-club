@@ -1,5 +1,5 @@
 // ============================================================
-// 피클볼 회원관리 — 로그인(아이디+비번)/역할 + 공지/스케줄/회비
+// 피클볼 회원관리 — 로그인(아이디+비번)/역할 + 공지/스케줄/회비/알림
 // ============================================================
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -15,12 +15,25 @@ const SLOT_START = 6, SLOT_END = 22, SLOT_CAP = 4;
 const MONTHLY_FEE = 100000;
 const addMonths = (ymd, n) => { const [y, m, d] = ymd.split("-").map(Number); const dt = new Date(y, m - 1 + n, d); return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`; };
 const maskName = (n) => { n = String(n || ""); if (n.length <= 1) return n; if (n.length === 2) return n[0] + "*"; return n[0] + "*".repeat(n.length - 2) + n[n.length - 1]; };
-// 전화번호 자동 하이픈 (01071398602 → 010-7139-8602)
 const fmtPhone = (v) => { let d = String(v || "").replace(/\D/g, "").slice(0, 11); if (d.length < 4) return d; if (d.length < 8) return d.slice(0, 3) + "-" + d.slice(3); return d.slice(0, 3) + "-" + d.slice(3, 7) + "-" + d.slice(7); };
-// 생년월일 8자리 자동변환 (19810403 → 1981-04-03)
 const fmtBirth = (v) => { let d = String(v || "").replace(/\D/g, "").slice(0, 8); if (d.length < 5) return d; if (d.length < 7) return d.slice(0, 4) + "-" + d.slice(4); return d.slice(0, 4) + "-" + d.slice(4, 6) + "-" + d.slice(6); };
-// 예약 상태 뱃지
 const bookingBadge = (st) => { const M = { "신청": ["warn", "예약신청"], "예약": ["ok", "예약확정"], "출석": ["ok", "출석"], "거절": ["bad", "거절"], "취소": ["", "취소"] }; const x = M[st] || ["", st]; return `<span class="pill ${x[0]}">${x[1]}</span>`; };
+// 회비 기간 색 막대
+const feeBar = (payments) => {
+  const ps = (payments || []).filter(p => p.period_start && p.period_end).sort((a, b) => a.period_end > b.period_end ? -1 : 1);
+  const last = ps[0];
+  if (!last) return `<div class="empty" style="padding:14px">회비 납부 기록이 없습니다.</div>`;
+  const start = new Date(last.period_start), end = new Date(last.period_end), now = new Date();
+  const total = (end - start) || 1, elapsed = Math.min(Math.max(now - start, 0), total);
+  const pct = Math.round(elapsed / total * 100);
+  const daysLeft = Math.ceil((end - now) / 86400000);
+  const cls = daysLeft < 0 ? "bad" : daysLeft <= 7 ? "warn" : "ok";
+  const label = daysLeft < 0 ? "만료됨" : `D-${daysLeft}`;
+  return `<div class="feebar"><div class="row spread" style="margin-bottom:6px">
+    <span class="li-sub">${dDate(start)} ~ ${dDate(end)}</span>
+    <span class="pill ${cls}">${label} · ${dDate(end)}까지</span></div>
+    <div class="feebar-track"><div class="feebar-fill ${cls}" style="width:${Math.max(4, pct)}%"></div></div></div>`;
+};
 
 const NAV = {
   admin: [["dashboard", "공지"], ["members", "회원"], ["schedules", "스케줄"], ["payments", "회비"], ["coaches", "코치"], ["settings", "설정"]],
@@ -39,6 +52,11 @@ const UI = {
     if (this.isStaff()) return esc(member.name);
     if (this.session && member.id === this.session.memberId) return esc(member.name);
     return esc(maskName(member.name));
+  },
+  nameOfBooking(b, members) {
+    if (b.member_id) return this.nameView(members.find(x => x.id === b.member_id));
+    const nm = b.booker_name || "(이름없음)";
+    return this.isStaff() ? esc(nm) : esc(maskName(nm));
   },
 
   async init() {
@@ -63,7 +81,7 @@ const UI = {
         <div class="login-hero"><div class="login-logo">🏓</div><div class="login-club">${esc(club)}</div>
           <div class="login-sub">회원관리 시스템</div></div>
         <div class="login-card">
-          <label>아이디</label><input id="lg_id" placeholder="아이디" autocomplete="username" />
+          <label>아이디</label><input id="lg_id" placeholder="아이디 (회원은 이름)" autocomplete="username" />
           <label>비밀번호</label><input id="lg_pw" type="password" placeholder="비밀번호" autocomplete="current-password" onkeydown="if(event.key==='Enter')UI.loginUser()" />
           <button class="btn login-btn" onclick="UI.loginUser()">로그인</button>
           <div class="login-foot">아직 회원이 아니신가요?
@@ -88,7 +106,7 @@ const UI = {
       return this.setSession({ role: "coach", name: c.name, coachId: c.id });
     }
     const members = await DB.list("members");
-    const m = members.find(x => x.login_id && x.login_id === id);
+    const m = members.find(x => (x.login_id && x.login_id === id) || x.name === id);
     if (m) {
       if ((m.password || "") !== pw) return UI.toast("비밀번호가 틀립니다", true);
       if (m.status !== "활동") return UI.toast("가입 승인 대기 중이거나 비활성 상태입니다.", true);
@@ -101,7 +119,7 @@ const UI = {
     const creds = await this.adminCreds();
     if (loginId === creds.admin_id) return true;
     const [members, coaches] = await Promise.all([DB.list("members"), DB.list("coaches")]);
-    if (members.some(m => m.login_id === loginId && m.id !== exMember)) return true;
+    if (members.some(m => (m.login_id === loginId || m.name === loginId) && m.id !== exMember)) return true;
     if (coaches.some(c => c.login_id === loginId && c.id !== exCoach)) return true;
     return false;
   },
@@ -118,14 +136,12 @@ const UI = {
     $("#tabs").style.display = "flex";
     const roleLabel = this.isAdmin() ? "관리자" : this.role() === "coach" ? "부관리자" : "회원";
     $("#whoami").textContent = `${this.session.name} (${roleLabel})`;
-    $("#bell").classList.toggle("hidden", !this.isStaff());
+    $("#bell").classList.remove("hidden");
     this.buildNav();
     await this.show("dashboard");
-    if (this.isStaff()) {
-      await this.refreshBell(true);
-      if (this._unsub) { try { this._unsub(); } catch (e) {} }
-      this._unsub = DB.subscribe(() => UI.onDataChange());
-    }
+    await this.refreshBell(true);
+    if (this._unsub) { try { this._unsub(); } catch (e) {} }
+    this._unsub = DB.subscribe(() => UI.onDataChange());
   },
   buildNav() {
     const items = NAV[this.role()] || NAV.member;
@@ -141,64 +157,75 @@ const UI = {
     $(`#view-${view}`).classList.add("active");
     try { await UI["render_" + view](); }
     catch (e) { UI.toast("불러오기 오류: " + (e.message || e), true); console.error(e); }
-    if (this.isStaff()) UI.refreshBell(true);
+    UI.refreshBell(true);
   },
 
   async onDataChange() {
     if ($("#modal").classList.contains("hidden")) { try { await UI["render_" + (UI._currentView || "dashboard")](); } catch (e) {} }
-    if (this.isStaff()) await UI.refreshBell(false);
+    await UI.refreshBell(false);
   },
   async refreshBell(silent) {
-    if (!this.isStaff()) return;
-    let members, bookings, coaches;
-    try { [members, bookings, coaches] = await Promise.all([DB.list("members"), DB.list("bookings"), DB.list("coaches")]); } catch (e) { return; }
-    const pendM = members.filter(m => m.status === "승인대기").length;
-    const pendB = bookings.filter(b => b.status === "신청").length;
-    const pendC = coaches.filter(c => (c.status || "활동") === "승인대기").length;
-    const pend = pendM + pendB + pendC;
+    let pend = 0, body = "";
+    if (this.isStaff()) {
+      let members, bookings, coaches;
+      try { [members, bookings, coaches] = await Promise.all([DB.list("members"), DB.list("bookings"), DB.list("coaches")]); } catch (e) { return; }
+      const pm = members.filter(m => m.status === "승인대기").length, pb = bookings.filter(b => b.status === "신청").length, pc = coaches.filter(c => (c.status || "활동") === "승인대기").length;
+      pend = pm + pb + pc; body = `가입 ${pm} · 예약 ${pb} · 부관리자 ${pc}`;
+    } else if (this.isMember()) {
+      let notifs; try { notifs = await DB.list("notifications"); } catch (e) { return; }
+      const seen = localStorage.getItem("pb_seen_" + this.session.memberId) || "";
+      pend = notifs.filter(n => n.member_id === this.session.memberId && (n.created_at || "") > seen).length;
+      body = `새 알림 ${pend}건`;
+    }
     const el = $("#bellCount");
     if (el) { if (pend > 0) { el.textContent = pend > 99 ? "99+" : pend; el.classList.remove("hidden"); } else el.classList.add("hidden"); }
     if (!silent && pend > (this._lastPend || 0)) {
-      UI.toast(`🔔 새 요청 ${pend - (this._lastPend || 0)}건 도착`);
-      UI.notifyAdmin("새 요청 도착", `가입 ${pendM} · 예약 ${pendB} · 부관리자 ${pendC}`);
+      UI.toast(`🔔 ${this.isMember() ? "새 알림(예약 확정 등)" : "새 요청"} ${pend - (this._lastPend || 0)}건`);
+      UI.notifyAdmin(this.isMember() ? "새 알림" : "새 요청 도착", body);
     }
     this._lastPend = pend;
   },
   notifyAdmin(title, body) { try { if ("Notification" in window && Notification.permission === "granted") new Notification(title, { body }); } catch (e) {} },
   bellClick() {
     if ("Notification" in window && Notification.permission === "default") { try { Notification.requestPermission(); } catch (e) {} }
-    UI.show("members");
+    if (this.isMember()) { localStorage.setItem("pb_seen_" + this.session.memberId, new Date().toISOString()); this._lastPend = 0; UI.refreshBell(true); UI.show("dashboard"); }
+    else UI.show("members");
   },
 
   toast(msg, isErr) { const t = $("#toast"); if (!t) return; t.textContent = msg; t.className = "toast" + (isErr ? " err" : ""); setTimeout(() => t.classList.add("hidden"), 2800); },
   openModal(title, html) { $("#modalTitle").textContent = title; $("#modalBody").innerHTML = html; $("#modal").classList.remove("hidden"); },
   closeModal() { $("#modal").classList.add("hidden"); },
 
-  // ==================== 대시보드 = 공지사항 (+회원 개인 회비 안내) ====================
+  // ==================== 대시보드 = 공지 (+회원 알림·회비) ====================
   async render_dashboard() {
     const notices = await DB.list("notices", { order: "created_at", asc: false });
     const club = (window.APP_CONFIG || {}).CLUB_NAME || "피클볼 클럽";
     const canPost = this.isStaff();
-    let myFee = "";
+    let myAlerts = "", myFee = "";
     if (this.isMember()) {
-      const payments = (await DB.list("payments")).filter(p => p.member_id === this.session.memberId);
-      const due = payments.map(p => p.period_end).filter(Boolean).sort().pop();
+      const [payments, notifs] = await Promise.all([DB.list("payments"), DB.list("notifications")]);
+      const myPays = payments.filter(p => p.member_id === this.session.memberId);
+      const due = myPays.map(p => p.period_end).filter(Boolean).sort().pop();
       const now = new Date();
       let state, cls, label;
       if (!due) { state = "회비 납부 기록이 없습니다. 첫 회비 납부를 진행해 주세요."; cls = "warn"; label = "확인"; }
       else { const days = (new Date(due) - now) / 86400000;
-        if (days < 0) { state = `회비가 만료되었습니다 (만료일 ${dDate(due)}). 회비 납부를 부탁드립니다.`; cls = "bad"; label = "미납"; }
+        if (days < 0) { state = `회비가 만료되었습니다 (만료일 ${dDate(due)}). 납부를 부탁드립니다.`; cls = "bad"; label = "미납"; }
         else if (days <= 7) { state = `회비 납부 예정일이 다가옵니다: ${dDate(due)}`; cls = "warn"; label = "임박"; }
         else { state = `회비 정상입니다. 다음 납부 예정일: ${dDate(due)}`; cls = "ok"; label = "정상"; }
       }
-      myFee = `<div class="card notice"><div class="row spread"><b class="notice-title">💳 내 회비 안내</b><span class="pill ${cls}">${label}</span></div><div class="notice-body">${esc(state)}</div></div>`;
+      myFee = `<div class="card notice"><div class="row spread"><b class="notice-title">💳 내 회비 안내</b><span class="pill ${cls}">${label}</span></div>
+        <div class="notice-body">${esc(state)}</div>${feeBar(myPays)}</div>`;
+      const mine = notifs.filter(n => n.member_id === this.session.memberId).sort((a, b) => a.created_at > b.created_at ? -1 : 1).slice(0, 6);
+      if (mine.length) myAlerts = `<div class="card notice"><b class="notice-title">📬 내 알림</b>
+        ${mine.map(n => `<div class="li-sub" style="margin-top:6px">• ${esc(n.message)} <span class="muted">${dDate(n.created_at)}</span></div>`).join("")}</div>`;
+      localStorage.setItem("pb_seen_" + this.session.memberId, new Date().toISOString());
     }
     $("#view-dashboard").innerHTML = `
       <div class="hero"><div class="hero-inner">
         <div class="hero-title">🏓 ${esc(club)}</div>
-        <div class="hero-sub">공지사항</div>
-      </div></div>
-      ${myFee}
+        <div class="hero-sub">공지사항</div></div></div>
+      ${myAlerts}${myFee}
       <div class="row spread"><h2>📢 공지사항</h2>
         ${canPost ? `<button class="btn" onclick="UI.noticeForm()">+ 공지 작성</button>` : ""}</div>
       ${notices.length ? notices.map(n => `
@@ -242,7 +269,7 @@ const UI = {
         ${pending.map(m => `<div class="row spread" style="padding:8px 0;border-top:1px solid var(--line)">
           <div onclick="UI.openMember('${m.id}')" style="cursor:pointer">
             <div class="li-main">${esc(m.name)} <span class="muted">${esc(m.gender || "")}</span></div>
-            <div class="li-sub">${esc(m.phone || "-")} · 생년월일 ${esc(m.birth_date || "-")} · 아이디 ${esc(m.login_id || "-")}</div></div>
+            <div class="li-sub">${esc(m.phone || "-")} · 생년월일 ${esc(m.birth_date || "-")} · 추천인 ${esc(m.referrer || "-")}</div></div>
           <div class="row"><button class="btn sm" onclick="UI.approveMember('${m.id}')">승인</button>
             <button class="btn ghost sm" onclick="UI.rejectMember('${m.id}')">거절</button></div>
         </div>`).join("")}</div>` : ""}
@@ -257,7 +284,7 @@ const UI = {
     $("#memList").innerHTML = list.length ? list.map(m => `
       <div class="list-item" onclick="UI.openMember('${m.id}')">
         <div><div class="li-main">${esc(m.name)} <span class="pill ${m.status === "활동" ? "ok" : "warn"}">${esc(m.status)}</span></div>
-          <div class="li-sub">${esc(m.phone || "-")} · 아이디 ${esc(m.login_id || "-")}</div></div>
+          <div class="li-sub">${esc(m.phone || "-")} · ${esc(m.gender || "")} · 추천인 ${esc(m.referrer || "-")}</div></div>
         <span class="muted">›</span></div>`).join("") : `<div class="empty">회원이 없습니다.</div>`;
   },
   memberForm(m = {}) {
@@ -266,7 +293,7 @@ const UI = {
     const fromLogin = !this.session;
     const g = m.gender || "";
     this.openModal(editing ? "회원 정보 수정" : "가입 신청", `
-      <label>이름 *</label><input id="m_name" value="${f("name")}" />
+      <label>이름 * <span class="muted">(로그인 아이디로 사용됩니다)</span></label><input id="m_name" value="${f("name")}" />
       <label>성별</label><select id="m_gender">
         <option value="" ${!g ? "selected" : ""}>선택</option>
         <option value="남" ${g === "남" ? "selected" : ""}>남</option>
@@ -274,12 +301,11 @@ const UI = {
       <label>전화번호 *</label><input id="m_phone" value="${f("phone")}" placeholder="010-0000-0000" inputmode="numeric" oninput="this.value=fmtPhone(this.value)" />
       <label>생년월일</label><input id="m_birth" value="${f("birth_date")}" placeholder="예: 19810403" inputmode="numeric" oninput="this.value=fmtBirth(this.value)" />
       <label>추천인</label><input id="m_referrer" value="${f("referrer")}" placeholder="소개해 주신 분" />
-      <label>아이디 *</label><input id="m_loginid" value="${f("login_id")}" placeholder="로그인 아이디" autocomplete="off" />
       ${editing
         ? `<div class="row" style="margin-top:8px"><button class="btn ghost sm" onclick="UI.resetMemberPw('${m.id}')">비밀번호 1234로 초기화</button></div>
            <label>상태</label><select id="m_status">${["승인대기", "활동", "휴면", "탈퇴"].map(o => `<option ${m.status === o ? "selected" : ""}>${o}</option>`).join("")}</select>`
         : `<label>비밀번호 *</label><input id="m_pw" type="password" placeholder="로그인 비밀번호" autocomplete="new-password" />
-           <div class="banner" style="margin-top:12px">신청하면 <b>승인 대기</b> 상태로 등록되고, 관리자 승인 후 <b>아이디+비밀번호</b>로 로그인할 수 있어요.</div>`}
+           <div class="banner" style="margin-top:12px">신청하면 <b>승인 대기</b> 상태로 등록되고, 관리자 승인 후 <b>이름 + 비밀번호</b>로 로그인할 수 있어요.</div>`}
       <div class="row" style="margin-top:16px;justify-content:flex-end">
         ${editing ? `<button class="btn danger" onclick="UI.deleteMember('${m.id}')">삭제</button>` : ""}
         <button class="btn ghost" onclick="UI.closeModal()">취소</button>
@@ -288,22 +314,22 @@ const UI = {
   },
   async saveMember(id, fromLogin) {
     const b = ($("#m_birth").value || "").trim();
+    const name = $("#m_name").value.trim();
     const row = {
-      name: $("#m_name").value.trim(), gender: ($("#m_gender") || {}).value || null,
+      name, gender: ($("#m_gender") || {}).value || null,
       phone: $("#m_phone").value.trim(), birth_date: /^\d{4}-\d{2}-\d{2}$/.test(b) ? b : null,
-      referrer: $("#m_referrer").value.trim(), login_id: ($("#m_loginid").value || "").trim()
+      referrer: $("#m_referrer").value.trim(), login_id: name
     };
     if (!row.name || !row.phone) return UI.toast("이름과 전화번호는 필수입니다", true);
-    if (!row.login_id) return UI.toast("아이디를 입력하세요", true);
     try {
       if (id) {
         row.status = $("#m_status").value;
-        if (await this.loginIdTaken(row.login_id, id, null)) return UI.toast("이미 사용 중인 아이디입니다", true);
+        if (await this.loginIdTaken(row.login_id, id, null)) return UI.toast("이미 같은 이름(아이디)이 있습니다", true);
         await DB.update("members", id, row); UI.closeModal(); UI.toast("저장됨"); UI.render_members();
       } else {
         const pw = ($("#m_pw").value || "").trim();
         if (!pw) return UI.toast("비밀번호를 입력하세요", true);
-        if (await this.loginIdTaken(row.login_id, null, null)) return UI.toast("이미 사용 중인 아이디입니다", true);
+        if (await this.loginIdTaken(row.login_id, null, null)) return UI.toast("이미 같은 이름이 있습니다. 다른 이름으로 신청하거나 관리자에게 문의하세요.", true);
         row.password = pw; row.status = "승인대기";
         await DB.insert("members", row); UI.closeModal();
         if (fromLogin) UI.toast("가입 신청 완료! 관리자 승인 후 로그인하세요.");
@@ -335,7 +361,7 @@ const UI = {
     const nextDue = myPays.map(p => p.period_end).filter(Boolean).sort().pop();
     this.openModal(m.name, `
       <div class="row spread">
-        <div class="li-sub">${esc(m.gender || "")} · ${esc(m.phone || "-")} · 생년월일 ${esc(m.birth_date || "-")}<br>아이디 ${esc(m.login_id || "-")} · 추천인 ${esc(m.referrer || "-")}
+        <div class="li-sub">${esc(m.gender || "")} · ${esc(m.phone || "-")} · 생년월일 ${esc(m.birth_date || "-")}<br>로그인 아이디 ${esc(m.login_id || m.name)} · 추천인 ${esc(m.referrer || "-")}
           <span class="pill ${m.status === "활동" ? "ok" : "warn"}">${esc(m.status)}</span></div>
         <button class="btn ghost sm" onclick='UI.memberForm(${JSON.stringify(m).replace(/'/g, "\\'")})'>수정</button>
       </div>
@@ -346,7 +372,8 @@ const UI = {
       </div>
       <div class="card" style="margin-top:12px">
         <b>회비</b> <span class="muted">· 다음 기준일: ${nextDue ? dDate(nextDue) : "기록 없음"}</span>
-        ${myPays.length ? myPays.map(p => `<div class="li-sub">• ${dDate(p.paid_date)} ${won(p.amount)} (${dDate(p.period_start)}~${dDate(p.period_end)})</div>`).join("") : `<div class="empty">납부 기록 없음</div>`}
+        ${feeBar(myPays)}
+        ${myPays.length ? myPays.map(p => `<div class="li-sub">• ${dDate(p.paid_date)} ${won(p.amount)} (${dDate(p.period_start)}~${dDate(p.period_end)})</div>`).join("") : ""}
         <button class="btn sm" style="margin-top:8px" onclick="UI.paymentForm('${id}')">+ 회비 입금 기록</button>
       </div>
       <div class="card"><b>예약 내역</b>
@@ -369,7 +396,6 @@ const UI = {
     this.cache.schedules = schedules; this.cache.bookings = bookings; this.cache.coaches = coaches;
     this.cal.sel = dayKey; this.drawCalendar();
     const active = members.filter(m => m.status === "활동");
-    const nm = id => this.nameView(members.find(x => x.id === id));
     const daySch = schedules.filter(s => localDay(s.start_at) === dayKey);
     const byHour = {}; daySch.forEach(s => { const h = new Date(s.start_at).getHours(); (byHour[h] = byHour[h] || []).push(s); });
     const [yy, mm, dd] = dayKey.split("-").map(Number);
@@ -386,8 +412,8 @@ const UI = {
         const full = booked.length >= (s.capacity || 99);
         return `<div class="slot-sch">
           <b>${esc(s.title)}</b> <span class="pill ${full ? "bad" : "ok"}">${booked.length}/${s.capacity || "-"}</span>
-          ${booked.length ? `<div class="li-sub">${bookingBadge("예약")} ${booked.map(b => nm(b.member_id)).join(", ")}</div>` : ""}
-          ${reqs.map(b => `<div class="row spread slot-req"><span>${bookingBadge("신청")} ${nm(b.member_id)}</span>
+          ${booked.length ? `<div class="li-sub">${bookingBadge("예약")} ${booked.map(b => this.nameOfBooking(b, members)).join(", ")}</div>` : ""}
+          ${reqs.map(b => `<div class="row spread slot-req"><span>${bookingBadge("신청")} ${this.nameOfBooking(b, members)}</span>
             ${staff ? `<span class="row"><button class="btn sm" onclick="UI.slotApprove('${b.id}','${dayKey}')">승인</button>
             <button class="btn ghost sm" onclick="UI.slotReject('${b.id}','${dayKey}')">거절</button></span>` : ""}</div>`).join("")}
         </div>`;
@@ -402,28 +428,42 @@ const UI = {
         <div class="slot-body">${inner}</div><div class="slot-act">${action}</div></div>`;
     }
     const memberPicker = staff
-      ? `<label>신청할 회원</label><select id="slotMember">${active.length ? active.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join("") : `<option value="">활동 회원 없음</option>`}</select>`
-      : `<div class="banner">원하는 시간의 <b>예약하기</b> 버튼을 누르면 신청됩니다. <b>${bookingBadge("신청")}</b>(예약신청) → 관리자 승인 → <b>${bookingBadge("예약")}</b>(예약확정)</div>`;
+      ? `<label>신청할 회원</label><select id="slotMember"><option value="__self__">나 (${esc(this.session.name)})</option>${active.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join("")}</select>`
+      : `<div class="banner">원하는 시간의 <b>예약하기</b>를 누르면 신청됩니다. <b>${bookingBadge("신청")}</b> → 관리자 승인 → <b>${bookingBadge("예약")}</b> (확정되면 알림이 와요)</div>`;
     this.openModal(`${mm}월 ${dd}일 (${wd}) 시간표`, `${memberPicker}<div class="slot-list">${rows}</div>`);
   },
   async requestSlot(dayKey, hour) {
-    const memberId = this.isStaff() ? ($("#slotMember") || {}).value : this.session.memberId;
-    if (!memberId) return UI.toast("회원을 선택하세요", true);
+    const sel = this.isStaff() ? (($("#slotMember") || {}).value) : this.session.memberId;
+    if (!sel) return UI.toast("회원을 선택하세요", true);
+    const isSelf = sel === "__self__";
     let schedules = await DB.list("schedules");
     let s = schedules.find(x => localDay(x.start_at) === dayKey && new Date(x.start_at).getHours() === hour);
     if (!s) {
       const start = new Date(`${dayKey}T${String(hour).padStart(2, "0")}:00:00`);
       const end = new Date(start); end.setHours(hour + 1);
       s = await DB.insert("schedules", { title: "타임 예약", start_at: start.toISOString(), end_at: end.toISOString(), capacity: SLOT_CAP, level: null, location: null, coach_id: null });
-    } else {
-      const bs = (await DB.list("bookings")).filter(b => b.schedule_id === s.id && b.member_id === memberId && ["신청", "예약", "출석"].includes(b.status));
-      if (bs.length) return UI.toast("이미 신청/예약된 시간입니다", true);
     }
-    await DB.insert("bookings", { schedule_id: s.id, member_id: memberId, status: "신청" });
-    UI.toast("예약 신청 완료 (관리자 승인 후 확정)");
+    const bookings = await DB.list("bookings");
+    if (isSelf) {
+      if (bookings.some(b => b.schedule_id === s.id && !b.member_id && b.booker_name === this.session.name && ["신청", "예약", "출석"].includes(b.status))) return UI.toast("이미 예약한 시간입니다", true);
+      await DB.insert("bookings", { schedule_id: s.id, member_id: null, booker_name: this.session.name, status: "예약" });
+      UI.toast("본인 예약이 등록되었습니다 (확정)");
+    } else {
+      if (bookings.some(b => b.schedule_id === s.id && b.member_id === sel && ["신청", "예약", "출석"].includes(b.status))) return UI.toast("이미 신청/예약된 시간입니다", true);
+      await DB.insert("bookings", { schedule_id: s.id, member_id: sel, status: "신청" });
+      UI.toast("예약 신청 완료 (관리자 승인 후 확정)");
+    }
     UI.openDay(dayKey);
   },
-  async slotApprove(bookingId, dayKey) { await DB.update("bookings", bookingId, { status: "예약" }); UI.toast("예약 확정됨"); UI.openDay(dayKey); },
+  async slotApprove(bookingId, dayKey) {
+    const bk = (await DB.list("bookings")).find(b => b.id === bookingId);
+    await DB.update("bookings", bookingId, { status: "예약" });
+    if (bk && bk.member_id) {
+      const s = (await DB.list("schedules")).find(x => x.id === bk.schedule_id);
+      try { await DB.insert("notifications", { member_id: bk.member_id, schedule_id: bk.schedule_id, channel: "app", message: `예약이 확정되었습니다: ${s ? s.title + " " + dDateTime(s.start_at) : ""}`, status: "sent", sent_at: new Date().toISOString() }); } catch (e) {}
+    }
+    UI.toast("예약 확정됨 (회원에게 알림 전송)"); UI.openDay(dayKey);
+  },
   async slotReject(bookingId, dayKey) { await DB.update("bookings", bookingId, { status: "거절" }); UI.toast("신청 거절됨"); UI.openDay(dayKey); },
   drawCalendar() {
     const { y, m, sel } = this.cal;
@@ -578,7 +618,10 @@ const UI = {
     if (!paid) return UI.toast("입금일을 선택하세요", true);
     const row = { member_id: memberId, amount: Number($("#p_amount").value) || 0, paid_date: paid, period_start: paid, period_end: addMonths(paid, months), months, method: $("#p_method").value, status: "완납", notes: $("#p_notes").value.trim() };
     const ret = ($("#p_return") || {}).value || "";
-    try { await DB.insert("payments", row); this.cache.payments = await DB.list("payments");
+    try {
+      await DB.insert("payments", row);
+      try { await DB.insert("notifications", { member_id: memberId, channel: "app", message: `회비가 등록되었습니다: ${won(row.amount)} (${dDate(row.period_start)}~${dDate(row.period_end)})`, status: "sent", sent_at: new Date().toISOString() }); } catch (e) {}
+      this.cache.payments = await DB.list("payments");
       UI.closeModal(); UI.toast("회비 입금 처리됨"); if (ret) UI.openFeeDay(ret); else UI.render_payments();
     } catch (e) { UI.toast("저장 실패: " + e.message, true); }
   },
@@ -666,9 +709,10 @@ const UI = {
     $("#view-myinfo").innerHTML = `
       <h2>내 정보</h2>
       <div class="card"><div class="li-main">${esc(m.name)} <span class="muted">${esc(m.gender || "")}</span></div>
-        <div class="li-sub">${esc(m.phone || "-")} · 아이디 ${esc(m.login_id || "-")} · 가입일 ${dDate(m.join_date)}</div></div>
-      <div class="card"><b>회비</b> <span class="muted">· 다음 입금 예정일: ${nextDue ? dDate(nextDue) : "기록 없음"}</span>
-        ${myPays.length ? myPays.map(p => `<div class="li-sub">• ${dDate(p.paid_date)} ${won(p.amount)} (${p.months || 1}개월, ~${dDate(p.period_end)})</div>`).join("") : `<div class="empty">납부 기록이 없습니다.</div>`}</div>
+        <div class="li-sub">${esc(m.phone || "-")} · 가입일 ${dDate(m.join_date)}</div></div>
+      <div class="card"><b>💳 내 회비</b> <span class="muted">· 다음 입금 예정일: ${nextDue ? dDate(nextDue) : "기록 없음"}</span>
+        ${feeBar(myPays)}
+        ${myPays.length ? myPays.map(p => `<div class="li-sub">• ${dDate(p.paid_date)} ${won(p.amount)} (${p.months || 1}개월, ~${dDate(p.period_end)})</div>`).join("") : ""}</div>
       <div class="card"><b>내 예약</b>
         ${myBooks.length ? myBooks.map(x => `<div class="row spread" style="padding:5px 0">
           <span>${esc(x.s.title)} <span class="muted">${dDateTime(x.s.start_at)}</span></span>${bookingBadge(x.b.status)}</div>`).join("") : `<div class="empty">예약 내역이 없습니다. 스케줄에서 예약하세요.</div>`}</div>`;

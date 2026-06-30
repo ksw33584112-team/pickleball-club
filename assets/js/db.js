@@ -12,7 +12,7 @@ const DB = (() => {
   let sb = null;
   if (configured && window.supabase) sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
 
-  const LS_KEY = "pickleball_demo_db_v4";
+  const LS_KEY = "pickleball_demo_db_v5";
   function loadLocal() { try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch { return {}; } }
   function saveLocal(d) { localStorage.setItem(LS_KEY, JSON.stringify(d)); }
   function uid() { return "id-" + Math.random().toString(36).slice(2, 10); }
@@ -24,9 +24,9 @@ const DB = (() => {
     const fmt = (dt) => dt.toISOString();
     d.coaches = [{ id: c1, name: "김코치", phone: "010-1111-2222", address: "서울시 강남구 테헤란로 1", role: "코치", specialty: "초보 레슨", login_id: "coach", password: "1234", status: "활동", created_at: fmt(today) }];
     d.members = [
-      { id: m1, name: "이회원", phone: "010-3333-4444", gender: "여", birth_date: "1990-05-12", referrer: "김코치", login_id: "lee", password: "1234", membership_type: "정회원", status: "활동", join_date: "2026-01-10", created_at: fmt(today) },
-      { id: m2, name: "박회원", phone: "010-5555-6666", gender: "남", birth_date: "1988-11-03", referrer: "이회원", login_id: "park", password: "1234", membership_type: "체험", status: "활동", join_date: "2026-06-01", created_at: fmt(today) },
-      { id: m3, name: "최신규", phone: "010-7777-8888", gender: "남", birth_date: "1995-02-20", referrer: "박회원", login_id: "choi", password: "1234", status: "승인대기", join_date: today.toISOString().slice(0, 10), created_at: fmt(today) }
+      { id: m1, name: "이회원", phone: "010-3333-4444", gender: "여", birth_date: "1990-05-12", referrer: "김코치", login_id: "이회원", password: "1234", membership_type: "정회원", status: "활동", join_date: "2026-01-10", created_at: fmt(today) },
+      { id: m2, name: "박회원", phone: "010-5555-6666", gender: "남", birth_date: "1988-11-03", referrer: "이회원", login_id: "박회원", password: "1234", membership_type: "체험", status: "활동", join_date: "2026-06-01", created_at: fmt(today) },
+      { id: m3, name: "최신규", phone: "010-7777-8888", gender: "남", birth_date: "1995-02-20", referrer: "박회원", login_id: "최신규", password: "1234", status: "승인대기", join_date: today.toISOString().slice(0, 10), created_at: fmt(today) }
     ];
     const start = new Date(today); start.setHours(19, 0, 0, 0);
     const end = new Date(start); end.setHours(20, 30, 0, 0);
@@ -69,7 +69,7 @@ const DB = (() => {
   function subscribe(onChange) {
     if (sb) {
       const ch = sb.channel("rt-all");
-      ["members", "bookings", "schedules", "payments", "notices"].forEach(t =>
+      ["members", "bookings", "schedules", "payments", "notices", "notifications"].forEach(t =>
         ch.on("postgres_changes", { event: "*", schema: "public", table: t }, (payload) => onChange(payload)));
       ch.subscribe();
       return () => { try { sb.removeChannel(ch); } catch (e) {} };

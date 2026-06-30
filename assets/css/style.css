@@ -162,3 +162,11 @@ label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
 /* 시간표 액션(예약 버튼/뱃지) */
 .slot-act{flex:0 0 auto;align-self:center;text-align:right;min-width:64px}
 .slot-act .pill{white-space:nowrap}
+
+/* 회비 기간 색 막대 */
+.feebar{margin:8px 0}
+.feebar-track{height:10px;background:#eef2f0;border-radius:6px;overflow:hidden}
+.feebar-fill{height:100%;border-radius:6px}
+.feebar-fill.ok{background:var(--green)}
+.feebar-fill.warn{background:var(--warn)}
+.feebar-fill.bad{background:var(--danger)}
