@@ -12,7 +12,7 @@ const DB = (() => {
   let sb = null;
   if (configured && window.supabase) sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
 
-  const LS_KEY = "pickleball_demo_db_v2";
+  const LS_KEY = "pickleball_demo_db_v3";
   function loadLocal() { try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch { return {}; } }
   function saveLocal(d) { localStorage.setItem(LS_KEY, JSON.stringify(d)); }
   function uid() { return "id-" + Math.random().toString(36).slice(2, 10); }
@@ -30,17 +30,14 @@ const DB = (() => {
     ];
     const start = new Date(today); start.setHours(19, 0, 0, 0);
     const end = new Date(start); end.setHours(20, 30, 0, 0);
-    const start2 = new Date(today); start2.setDate(start2.getDate() + 2); start2.setHours(10, 0, 0, 0);
-    const end2 = new Date(start2); end2.setHours(11, 30, 0, 0);
-    d.schedules = [
-      { id: s1, title: "저녁 초급반", coach_id: c1, start_at: fmt(start), end_at: fmt(end), location: "1번 코트", capacity: 8, level: "초급", created_at: fmt(today) },
-      { id: uid(), title: "주말 오전반", coach_id: c1, start_at: fmt(start2), end_at: fmt(end2), location: "2번 코트", capacity: 6, level: "중급", created_at: fmt(today) }
-    ];
+    d.schedules = [{ id: s1, title: "저녁 초급반", coach_id: c1, start_at: fmt(start), end_at: fmt(end), location: "1번 코트", capacity: 8, level: "초급", created_at: fmt(today) }];
     d.bookings = [
       { id: uid(), schedule_id: s1, member_id: m1, status: "예약", created_at: fmt(today) },
       { id: uid(), schedule_id: s1, member_id: m2, status: "신청", note: "참석 가능할까요?", created_at: fmt(today) }
     ];
     d.payments = [{ id: uid(), member_id: m1, amount: 100000, paid_date: "2026-06-01", months: 1, period_start: "2026-06-01", period_end: "2026-06-30", method: "계좌이체", status: "완납", created_at: fmt(today) }];
+    d.notices = [{ id: uid(), title: "환영합니다!", content: "피클볼 클럽 공지사항 게시판입니다. 일정·휴관·이벤트 안내가 여기 올라옵니다.", created_at: fmt(today) }];
+    d.app_config = [{ id: "main", admin_id: "김소원", admin_pw: "1234" }];
     d.notifications = [];
     d._seeded = true;
     saveLocal(d);
@@ -69,12 +66,10 @@ const DB = (() => {
     if (sb && cfg.NOTIFY_FUNCTION) { const { data, error } = await sb.functions.invoke(cfg.NOTIFY_FUNCTION, { body: payload }); if (error) throw error; return data; }
     return { simulated: true, count: (payload.recipients || []).length };
   }
-
-  // 실시간 구독: 데이터가 바뀌면 onChange 호출
   function subscribe(onChange) {
     if (sb) {
       const ch = sb.channel("rt-all");
-      ["members", "bookings", "schedules", "payments"].forEach(t =>
+      ["members", "bookings", "schedules", "payments", "notices"].forEach(t =>
         ch.on("postgres_changes", { event: "*", schema: "public", table: t }, (payload) => onChange(payload)));
       ch.subscribe();
       return () => { try { sb.removeChannel(ch); } catch (e) {} };

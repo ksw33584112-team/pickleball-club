@@ -11,28 +11,26 @@
   <link rel="stylesheet" href="assets/css/style.css" />
 </head>
 <body>
-  <header class="topbar">
+  <header class="topbar" id="topbar" style="display:none">
     <div class="brand">🏓 <span id="clubName">피클볼 클럽</span></div>
     <div class="top-right">
-      <button id="bell" class="bell" onclick="UI.bellClick()" title="알림">🔔<span id="bellCount" class="bell-count hidden">0</span></button>
-      <div id="connBadge" class="badge badge-warn">연결 확인 중…</div>
+      <span id="whoami" class="whoami"></span>
+      <button id="bell" class="bell hidden" onclick="UI.bellClick()" title="알림">🔔<span id="bellCount" class="bell-count hidden">0</span></button>
+      <button id="logoutBtn" class="btn ghost sm" onclick="UI.logout()">로그아웃</button>
     </div>
   </header>
 
-  <nav class="tabs" id="tabs">
-    <button class="tab active" data-view="dashboard">대시보드</button>
-    <button class="tab" data-view="members">회원</button>
-    <button class="tab" data-view="schedules">스케줄</button>
-    <button class="tab" data-view="payments">회비</button>
-    <button class="tab" data-view="coaches">코치</button>
-  </nav>
+  <nav class="tabs" id="tabs" style="display:none"></nav>
 
   <main id="app">
-    <section id="view-dashboard" class="view active"></section>
+    <section id="view-login" class="view active"></section>
+    <section id="view-dashboard" class="view"></section>
     <section id="view-members" class="view"></section>
     <section id="view-schedules" class="view"></section>
     <section id="view-payments" class="view"></section>
     <section id="view-coaches" class="view"></section>
+    <section id="view-myinfo" class="view"></section>
+    <section id="view-settings" class="view"></section>
   </main>
 
   <div id="modal" class="modal hidden">
