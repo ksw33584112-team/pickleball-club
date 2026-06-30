@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#1f7a4d" />
+  <title>피클볼 회원관리</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="assets/icons/icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <link rel="stylesheet" href="assets/css/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🏓 <span id="clubName">피클볼 클럽</span></div>
+    <div class="top-right">
+      <button id="bell" class="bell" onclick="UI.bellClick()" title="알림">🔔<span id="bellCount" class="bell-count hidden">0</span></button>
+      <div id="connBadge" class="badge badge-warn">연결 확인 중…</div>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-view="dashboard">대시보드</button>
+    <button class="tab" data-view="members">회원</button>
+    <button class="tab" data-view="schedules">스케줄</button>
+    <button class="tab" data-view="payments">회비</button>
+    <button class="tab" data-view="coaches">코치</button>
+  </nav>
+
+  <main id="app">
+    <section id="view-dashboard" class="view active"></section>
+    <section id="view-members" class="view"></section>
+    <section id="view-schedules" class="view"></section>
+    <section id="view-payments" class="view"></section>
+    <section id="view-coaches" class="view"></section>
+  </main>
+
+  <div id="modal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3 id="modalTitle">제목</h3>
+        <button class="icon-btn" onclick="UI.closeModal()">✕</button>
+      </div>
+      <div id="modalBody" class="modal-body"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="assets/js/config.js"></script>
+  <script src="assets/js/db.js"></script>
+  <script src="assets/js/app.js"></script>
+  <script>
+    if ("serviceWorker" in navigator) { navigator.serviceWorker.register("sw.js").catch(() => {}); }
+  </script>
+</body>
+</html>

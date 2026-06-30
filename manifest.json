@@ -1,0 +1,15 @@
+{
+  "name": "피클볼 회원관리",
+  "short_name": "피클볼",
+  "description": "피클볼 클럽 회원·예약·회비 관리",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f4f6f5",
+  "theme_color": "#1f7a4d",
+  "icons": [
+    { "src": "assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "assets/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
