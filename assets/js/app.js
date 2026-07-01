@@ -222,9 +222,13 @@ const UI = {
       localStorage.setItem("pb_seen_" + this.session.memberId, new Date().toISOString());
     }
     $("#view-dashboard").innerHTML = `
-      <div class="hero"><div class="hero-inner">
-        <div class="hero-title">🏓 ${esc(club)}</div>
-        <div class="hero-sub">공지사항</div></div></div>
+      <div class="hero"><div class="hero-face">
+        <div class="hero-shine"></div>
+        <span class="hero-spk" style="top:26%;left:14%;animation-delay:.2s"></span>
+        <span class="hero-spk" style="top:66%;left:26%;animation-delay:1s"></span>
+        <span class="hero-spk" style="top:40%;left:40%;animation-delay:1.6s"></span>
+        <svg class="hero-ball"><use href="#pbball"></use></svg>
+        <div class="hero-title">${esc(club)}</div></div></div>
       ${myAlerts}${myFee}
       <div class="row spread"><h2>📢 공지사항</h2>
         ${canPost ? `<button class="btn" onclick="UI.noticeForm()">+ 공지 작성</button>` : ""}</div>
