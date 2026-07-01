@@ -170,3 +170,48 @@ label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
 .feebar-fill.ok{background:var(--green)}
 .feebar-fill.warn{background:var(--warn)}
 .feebar-fill.bad{background:var(--danger)}
+
+/* ===== 화려한 히어로 후광 ===== */
+.hero{position:relative}
+.hero::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(circle at 78% 46%, rgba(190,255,90,.40), transparent 44%);
+  mix-blend-mode:screen;animation:heroPulse 4s ease-in-out infinite}
+@keyframes heroPulse{0%,100%{opacity:.5}50%{opacity:1}}
+.hero-title{text-shadow:0 2px 12px rgba(0,0,0,.5), 0 0 22px rgba(150,255,120,.35)}
+.hero-inner{position:relative;z-index:1}
+
+/* ===== 예약 뱃지(확정/신청 색·모양) ===== */
+.bk-badge{display:inline-block;font-size:12px;font-weight:800;padding:3px 10px;border-radius:999px;line-height:1.5;white-space:nowrap}
+.bk-badge.conf{background:var(--green);color:#fff}
+.bk-badge.pend{background:#fff3d6;color:#a86800;border:1px dashed #e0a92e;border-radius:8px}
+.bk-badge.bad{background:#fdecea;color:var(--danger)}
+.bk-badge.muted{background:#eef2f0;color:var(--muted)}
+.bk-badge.big{font-size:14px;padding:5px 14px}
+
+/* 시간표 예약 박스 */
+.bk-box{margin-top:6px;padding:8px 10px;border-radius:10px}
+.bk-box.confirmed{background:#eaf7ef;border-left:4px solid var(--green)}
+.bk-box.pending{background:#fff7e6;border-left:4px solid #e0a92e}
+.bk-names{margin-left:4px;font-weight:600}
+.slot-row.row-conf{box-shadow:inset 4px 0 0 var(--green);background:#f6fbf8}
+.slot-row.row-pend{box-shadow:inset 4px 0 0 #e0a92e;background:#fffbf2}
+.slot-row.row-conf .slot-time{color:var(--green)}
+.slot-row.row-pend .slot-time{color:#a86800}
+
+/* ===== 달력 상태 마커(색+모양) ===== */
+.cal-dots{display:flex;gap:3px;align-items:center}
+.cmark{display:inline-block;width:7px;height:7px}
+.cmark.ok{background:var(--green);border-radius:50%}
+.cmark.pend{background:#e0a92e;border-radius:1px;transform:rotate(45deg)}
+.cmark.plain{background:#c3ccc7;border-radius:50%}
+
+/* ===== 회원: 섹션 구분 + 승인/거절 버튼 고정 ===== */
+.section-head{display:flex;align-items:center;gap:8px;font-weight:800;font-size:15px;margin:6px 0 10px}
+.section-head .cnt{background:var(--green);color:#fff;font-size:12px;min-width:20px;height:20px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;padding:0 6px}
+.section-head.warn{color:#a86800}
+.section-head.warn .cnt{background:#e0a92e}
+.pending-card{background:#fffaf0;border:1px solid #f0d98a;border-radius:14px;padding:6px 14px 12px;margin-bottom:14px}
+.approve-item{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid rgba(0,0,0,.07)}
+.approve-item:first-of-type{border-top:0}
+.ai-info{flex:1;min-width:0;cursor:pointer}
+.ai-actions{flex:0 0 auto;display:flex;gap:6px}

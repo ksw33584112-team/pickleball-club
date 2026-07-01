@@ -17,7 +17,7 @@ const addMonths = (ymd, n) => { const [y, m, d] = ymd.split("-").map(Number); co
 const maskName = (n) => { n = String(n || ""); if (n.length <= 1) return n; if (n.length === 2) return n[0] + "*"; return n[0] + "*".repeat(n.length - 2) + n[n.length - 1]; };
 const fmtPhone = (v) => { let d = String(v || "").replace(/\D/g, "").slice(0, 11); if (d.length < 4) return d; if (d.length < 8) return d.slice(0, 3) + "-" + d.slice(3); return d.slice(0, 3) + "-" + d.slice(3, 7) + "-" + d.slice(7); };
 const fmtBirth = (v) => { let d = String(v || "").replace(/\D/g, "").slice(0, 8); if (d.length < 5) return d; if (d.length < 7) return d.slice(0, 4) + "-" + d.slice(4); return d.slice(0, 4) + "-" + d.slice(4, 6) + "-" + d.slice(6); };
-const bookingBadge = (st) => { const M = { "신청": ["warn", "예약신청"], "예약": ["ok", "예약확정"], "출석": ["ok", "출석"], "거절": ["bad", "거절"], "취소": ["", "취소"] }; const x = M[st] || ["", st]; return `<span class="pill ${x[0]}">${x[1]}</span>`; };
+const bookingBadge = (st, big) => { const M = { "신청": ["pend", "⏳ 예약신청"], "예약": ["conf", "✓ 예약확정"], "출석": ["conf", "✓ 출석"], "거절": ["bad", "거절"], "취소": ["muted", "취소"] }; const x = M[st] || ["muted", st]; return `<span class="bk-badge ${x[0]}${big ? " big" : ""}">${x[1]}</span>`; };
 // 회비 기간 색 막대
 const feeBar = (payments) => {
   const ps = (payments || []).filter(p => p.period_start && p.period_end).sort((a, b) => a.period_end > b.period_end ? -1 : 1);
@@ -264,16 +264,16 @@ const UI = {
     this.cache.memberList = others;
     $("#view-members").innerHTML = `
       <div class="row spread"><h2>회원</h2><button class="btn" onclick="UI.memberForm()">+ 회원 추가</button></div>
-      ${pending.length ? `<div class="card" style="border-color:var(--warn)">
-        <b>⏳ 가입 승인 대기 (${pending.length})</b>
-        ${pending.map(m => `<div class="row spread" style="padding:8px 0;border-top:1px solid var(--line)">
-          <div onclick="UI.openMember('${m.id}')" style="cursor:pointer">
+      ${pending.length ? `<div class="pending-card">
+        <div class="section-head warn"><span>⏳ 가입 승인 대기</span><span class="cnt">${pending.length}</span></div>
+        ${pending.map(m => `<div class="approve-item">
+          <div class="ai-info" onclick="UI.openMember('${m.id}')">
             <div class="li-main">${esc(m.name)} <span class="muted">${esc(m.gender || "")}</span></div>
             <div class="li-sub">${esc(m.phone || "-")} · 생년월일 ${esc(m.birth_date || "-")} · 추천인 ${esc(m.referrer || "-")}</div></div>
-          <div class="row"><button class="btn sm" onclick="UI.approveMember('${m.id}')">승인</button>
+          <div class="ai-actions"><button class="btn sm" onclick="UI.approveMember('${m.id}')">승인</button>
             <button class="btn ghost sm" onclick="UI.rejectMember('${m.id}')">거절</button></div>
         </div>`).join("")}</div>` : ""}
-      <div class="row spread" style="margin-top:6px"><b>회원 목록 (${others.length})</b></div>
+      <div class="section-head" style="margin-top:16px"><span>👥 회원 목록</span><span class="cnt">${others.length}</span></div>
       <input class="search" id="memSearch" placeholder="이름·연락처 검색" oninput="UI.filterMembers(this.value)" />
       <div id="memList" style="margin-top:10px"></div>`;
     this.filterMembers("");
@@ -411,20 +411,23 @@ const UI = {
         const reqs = bs.filter(b => b.status === "신청");
         const full = booked.length >= (s.capacity || 99);
         return `<div class="slot-sch">
-          <b>${esc(s.title)}</b> <span class="pill ${full ? "bad" : "ok"}">${booked.length}/${s.capacity || "-"}</span>
-          ${booked.length ? `<div class="li-sub">${bookingBadge("예약")} ${booked.map(b => this.nameOfBooking(b, members)).join(", ")}</div>` : ""}
-          ${reqs.map(b => `<div class="row spread slot-req"><span>${bookingBadge("신청")} ${this.nameOfBooking(b, members)}</span>
+          <div class="row spread"><b>${esc(s.title)}</b> <span class="pill ${full ? "bad" : "ok"}">${booked.length}/${s.capacity || "-"}</span></div>
+          ${booked.length ? `<div class="bk-box confirmed">${bookingBadge("예약", true)} <span class="bk-names">${booked.map(b => this.nameOfBooking(b, members)).join(", ")}</span></div>` : ""}
+          ${reqs.map(b => `<div class="bk-box pending"><div class="row spread"><span>${bookingBadge("신청", true)} <b>${this.nameOfBooking(b, members)}</b></span>
             ${staff ? `<span class="row"><button class="btn sm" onclick="UI.slotApprove('${b.id}','${dayKey}')">승인</button>
-            <button class="btn ghost sm" onclick="UI.slotReject('${b.id}','${dayKey}')">거절</button></span>` : ""}</div>`).join("")}
+            <button class="btn ghost sm" onclick="UI.slotReject('${b.id}','${dayKey}')">거절</button></span>` : ""}</div></div>`).join("")}
         </div>`;
       }).join("");
       let action;
       if (staff) action = `<button class="btn ghost sm slot-add" onclick="UI.requestSlot('${dayKey}',${h})">신청추가</button>`;
       else {
         const mine = schs.flatMap(s => bookings.filter(b => b.schedule_id === s.id && b.member_id === myId && ["신청", "예약", "출석"].includes(b.status)));
-        action = mine.length ? bookingBadge(mine[0].status) : `<button class="btn sm slot-add" onclick="UI.requestSlot('${dayKey}',${h})">예약하기</button>`;
+        action = mine.length ? bookingBadge(mine[0].status, true) : `<button class="btn sm slot-add" onclick="UI.requestSlot('${dayKey}',${h})">예약하기</button>`;
       }
-      rows += `<div class="slot-row"><div class="slot-time">${String(h).padStart(2, "0")}:00</div>
+      const rHasPend = schs.some(s => bookings.some(b => b.schedule_id === s.id && b.status === "신청"));
+      const rHasConf = schs.some(s => bookings.some(b => b.schedule_id === s.id && ACTIVE_BOOK.includes(b.status)));
+      const rowCls = rHasPend ? " row-pend" : rHasConf ? " row-conf" : "";
+      rows += `<div class="slot-row${rowCls}"><div class="slot-time">${String(h).padStart(2, "0")}:00</div>
         <div class="slot-body">${inner}</div><div class="slot-act">${action}</div></div>`;
     }
     const memberPicker = staff
@@ -478,9 +481,15 @@ const UI = {
     for (let d = 1; d <= days; d++) {
       const key = `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
       const items = byDay[key] || [];
-      const dots = items.slice(0, 3).map(() => `<span class="dot"></span>`).join("");
+      const dayBk = bookings.filter(b => items.some(s => s.id === b.schedule_id));
+      const hasConf = dayBk.some(b => ACTIVE_BOOK.includes(b.status));
+      const hasPend = dayBk.some(b => b.status === "신청");
+      let marks = "";
+      if (hasConf) marks += `<span class="cmark ok" title="예약확정"></span>`;
+      if (hasPend) marks += `<span class="cmark pend" title="예약신청"></span>`;
+      if (!hasConf && !hasPend && items.length) marks += `<span class="cmark plain"></span>`;
       cells += `<div class="cal-cell${key === sel ? " sel" : ""}${key === todayKey ? " today" : ""}" onclick="UI.openDay('${key}')">
-        <span class="cal-num">${d}</span>${items.length ? `<span class="cal-dots">${dots}${items.length > 3 ? "+" : ""}</span>` : ""}</div>`;
+        <span class="cal-num">${d}</span>${marks ? `<span class="cal-dots">${marks}</span>` : ""}</div>`;
     }
     const selItems = byDay[sel] || []; const [sy, sm, sd] = sel.split("-").map(Number);
     const selLabel = `${sy}년 ${sm}월 ${sd}일 (${wd[new Date(sy, sm - 1, sd).getDay()]})`;
